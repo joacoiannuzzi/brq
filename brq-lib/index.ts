@@ -1,7 +1,7 @@
 import {
   MutationFunction,
   UseMutateAsyncFunction,
-  useMutation,
+  useMutation as useReactMutation,
   UseMutationOptions,
   UseMutationResult,
   useQuery as useReactQuery,
@@ -125,6 +125,9 @@ const generateRestQueryKeys = <
 };
 
 const generateRestMutationHook = <
+  F extends (args: Record<string, any>) => Promise<any>,
+  Api extends { [key: string]: F },
+  MutationKeys extends keyof Api,
   KeysFunc extends (args: any) => any[],
   Keys extends Record<string, KeysFunc>,
   Invalidations extends {
@@ -132,26 +135,45 @@ const generateRestMutationHook = <
       ? () => void
       : (args: Parameters<Keys[key]>[0]) => void;
   },
-  Hook extends <
-    TData = unknown,
-    TError = unknown,
-    TVariables = void,
-    TContext = unknown
-  >(
-    mutationFn: MutationFunction<TData, TVariables>,
-    options?: Omit<
-      UseMutationOptions<TData, TError, TVariables, TContext>,
-      "mutationFn"
-    > & {
-      invalidateQueries?: (invalidations: Invalidations) => void;
-    }
-  ) => [
-    UseMutateAsyncFunction<TData, TError, TVariables, TContext>,
-    UseMutationResult<TData, TError, TVariables, TContext>
-  ]
+  Hooks extends {
+    [key in MutationKeys]: Parameters<Api[key]>[0] extends undefined
+      ? <
+          TData = Await<ReturnType<Api[key]>>,
+          TError = unknown,
+          TVariables = void,
+          TContext = unknown
+        >(
+          options?: Omit<
+            UseMutationOptions<TData, TError, TVariables, TContext>,
+            "mutationFn"
+          > & {
+            invalidateQueries?: (invalidations: Invalidations) => void;
+          }
+        ) => [
+          UseMutateAsyncFunction<TData, TError, TVariables, TContext>,
+          UseMutationResult<TData, TError, TVariables, TContext>
+        ]
+      : <
+          TData = Await<ReturnType<Api[key]>>,
+          TError = unknown,
+          TVariables = Parameters<Api[key]>[0],
+          TContext = unknown
+        >(
+          options?: Omit<
+            UseMutationOptions<TData, TError, TVariables, TContext>,
+            "mutationFn"
+          > & {
+            invalidateQueries?: (invalidations: Invalidations) => void;
+          }
+        ) => [
+          UseMutateAsyncFunction<TData, TError, TVariables, TContext>,
+          UseMutationResult<TData, TError, TVariables, TContext>
+        ];
+  }
 >(
-  keys: Keys
-): Hook => {
+  keys: Keys,
+  api: Api
+): Hooks => {
   const useMutationHook = (mutationFn, options) => {
     const queryClient = useQueryClient();
     const invalidateFunctions = {} as Invalidations;
@@ -164,7 +186,7 @@ const generateRestMutationHook = <
         queryClient.invalidateQueries(finalKey);
       };
     }
-    const { mutateAsync, ...other } = useMutation(mutationFn, {
+    const { mutateAsync, ...other } = useReactMutation(mutationFn, {
       ...options,
       onSuccess: (data, variables, context) => {
         options?.onSuccess?.(data, variables, context);
@@ -173,23 +195,53 @@ const generateRestMutationHook = <
     });
     return [mutateAsync, { mutateAsync, ...other }];
   };
-  return useMutationHook as Hook;
+
+  const hooks = {} as Hooks;
+  for (const key in api) {
+    const typedKey = key as unknown as MutationKeys;
+    const f = api[typedKey];
+
+    const useHook = (options?: any) => {
+      return useMutationHook(f, options);
+    };
+
+    // @ts-ignore
+    hooks[typedKey] = useHook;
+  }
+  return hooks;
 };
 
-export const generateRestQueryClient = <
+export const generateHooks = <
   F extends (
     args: any extends Record<string, any> ? Record<string, any> : any
   ) => Promise<any>,
-  Api extends { [key: string]: F }
+  Queries extends { [key: string]: F },
+  Mutations extends { [key: string]: F },
+  Api extends { queries: Queries; mutations: Mutations },
+  QueryKeys extends keyof Api["queries"],
+  MutationKeys extends keyof Api["mutations"],
+  QueryObject extends {
+    [key in QueryKeys]: (
+      args: Parameters<Api["queries"][key]>[0]
+    ) => ReturnType<Api["queries"][key]>;
+  },
+  MutationObject extends {
+    [key in MutationKeys]: (
+      args: Parameters<Api["mutations"][key]>[0]
+    ) => ReturnType<Api["mutations"][key]>;
+  }
 >(
   api: Api
 ) => {
-  const keys = generateRestQueryKeys(api);
-  const hooks = generateRestQueryHook(api);
-  const useMutationHook = generateRestMutationHook(keys);
+  const keys = generateRestQueryKeys(api.queries as unknown as QueryObject);
+  const hooks = generateRestQueryHook(api.queries as unknown as QueryObject);
+  const useMutationHook = generateRestMutationHook(
+    keys,
+    api.mutations as unknown as MutationObject
+  );
   return {
     queryKeys: keys,
-    useRestQuery: hooks,
-    useRestMutation: useMutationHook,
+    useQuery: hooks,
+    useMutation: useMutationHook,
   };
 };

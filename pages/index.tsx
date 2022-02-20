@@ -1,21 +1,30 @@
 import type { NextPage } from "next";
-import { useRestMutation, useRestQuery } from "../brq";
+import { useMutation, useQuery } from "../brq";
 
 const Home: NextPage = () => {
-  const [posts] = useRestQuery.getPosts({ userId: "1" });
-  const [user] = useRestQuery.getUser();
-  const [mutate] = useRestMutation(async () => ({ id: 1 }), {
+  const [posts] = useQuery.getPosts({ userId: "1" });
+  const [user] = useQuery.getUser();
+  const [updateUser] = useMutation.updateUser({
     invalidateQueries: (invalidations) => {
-      invalidations.getUser();
       invalidations.getPosts({ userId: "1" });
+      invalidations.getUser();
     },
   });
+  const [updatePosts] = useMutation.updatePosts();
+
+  console.log({
+    posts,
+    user,
+  });
+
   return (
     <div>
       <button
         onClick={async () => {
-          const a = await mutate();
+          const a = await updateUser();
           console.log(a);
+          const b = await updatePosts({ userId: "1" });
+          console.log(b);
         }}
       >
         mutate

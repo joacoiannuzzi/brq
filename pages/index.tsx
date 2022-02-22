@@ -4,12 +4,14 @@ import { useMutation, useQuery } from "../brq";
 const Home: NextPage = () => {
   const [posts] = useQuery.getPosts({ userId: "1" });
   const [user] = useQuery.getUser();
+
   const [updateUser] = useMutation.updateUser({
     invalidateQueries: (invalidations) => {
       invalidations.getPosts({ userId: "1" });
       invalidations.getUser();
     },
   });
+
   const [updatePosts] = useMutation.updatePosts();
 
   console.log({
